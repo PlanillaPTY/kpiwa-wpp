@@ -133,6 +133,139 @@ async function getOrCreateClient(sessionName, options = {}) {
   }
 }
 
+// Enhanced helper function to get or create a client with custom QR and status callbacks
+async function getOrCreateClientWithCallbacks(sessionName, options = {}) {
+  const { onQRCode, onStatusChange, ...wppOptions } = options;
+  
+  // Check if session exists by looking for token files
+  const exists = await sessionExists(sessionName);
+  
+  if (!exists) {
+    console.log(`ℹ️ Session '${sessionName}' not found in tokens folder. It will be created.`);
+  } else {
+    console.log(`ℹ️ Session '${sessionName}' found in tokens folder.`);
+  }
+
+  // Check if we have a cached client
+  if (clients.has(sessionName)) {
+    const existingClient = clients.get(sessionName);
+    console.log('Client has been found', existingClient);
+    
+    try {
+      // Check if client is still connected
+      const isConnected = await existingClient.isConnected();
+      
+      if (isConnected) {
+        console.log('✅ Client already initialized and connected, reusing existing connection');
+        return existingClient;
+      } else {
+        console.log('⚠️ Cached client found but not connected, removing and reinitializing');
+        clients.delete(sessionName);
+        // Fall through to create new client
+      }
+    } catch (error) {
+      console.log('⚠️ Error checking cached client state, removing and reinitializing');
+      clients.delete(sessionName);
+      // Fall through to create new client
+    }
+  }
+
+  // Create new client with custom callbacks
+  try {
+    console.log(`📱 Initializing client for session: ${sessionName} with custom callbacks`);
+    
+    const client = await wppconnect.create({
+      session: sessionName,
+      headless: true,
+      puppeteerOptions: {
+        userDataDir: path.join(__dirname, 'data', 'tokens', sessionName),
+      },
+      useChrome: true,
+      catchQR: (base64Qrimg, asciiQR, attempts, urlCode) => {
+        console.log('📱 QR Code received - scan this in WhatsApp:');
+        console.log(`Attempts: ${attempts}`);
+        console.log(asciiQR);
+        
+        // Call custom QR callback if provided
+        if (onQRCode && typeof onQRCode === 'function') {
+          onQRCode({
+            base64: base64Qrimg,
+            ascii: asciiQR,
+            attempts: attempts,
+            urlCode: urlCode,
+            sessionName: sessionName
+          });
+        }
+      },
+      statusFind: (status) => {
+        console.log(`📱 Status for ${sessionName}:`, status);
+        
+        // Call custom status callback if provided
+        if (onStatusChange && typeof onStatusChange === 'function') {
+          onStatusChange({
+            status: status,
+            sessionName: sessionName,
+            timestamp: new Date().toISOString()
+          });
+        }
+      },
+      ...wppOptions
+    });
+
+    clients.set(sessionName, client);
+    console.log('✅ Client initialized successfully with callbacks!');
+
+    // 🧠 Wait a bit for client to be fully initialized, then check authentication
+    setTimeout(async () => {
+      try {
+        if (await client.isConnected()) {
+          console.log('✅ WhatsApp is connected');
+
+          const sessionToken = await client.getSessionTokenBrowser();
+          console.log('📦 Extracted session token:', sessionToken);
+
+          // 💾 Save it manually using your tokenStore
+          await tokenStore.setToken(sessionName, sessionToken);
+          console.log('💾 Token saved manually to FileTokenStore');
+          
+          // Notify status change callback of successful connection
+          if (onStatusChange && typeof onStatusChange === 'function') {
+            onStatusChange({
+              status: 'authenticated',
+              sessionName: sessionName,
+              timestamp: new Date().toISOString()
+            });
+          }
+        }
+      } catch (error) {
+        console.log(`⚠️ Error during token extraction: ${error.message}`);
+        if (onStatusChange && typeof onStatusChange === 'function') {
+          onStatusChange({
+            status: 'error',
+            sessionName: sessionName,
+            timestamp: new Date().toISOString(),
+            error: error.message
+          });
+        }
+      }
+    }, 2000); // Wait 2 seconds for client to be ready
+
+    return client;
+
+  } catch (error) {
+    console.log(`❌ Error initializing client: ${error.message}`);
+    if (onStatusChange && typeof onStatusChange === 'function') {
+      onStatusChange({
+        status: 'error',
+        sessionName: sessionName,
+        timestamp: new Date().toISOString(),
+        error: error.message
+      });
+    }
+    throw error;
+  }
+}
+
 // Function to list all sessions by scanning the tokens directory
 async function listSessions() {
   try {
@@ -1422,6 +1555,7 @@ module.exports = {
   // Client management
   initializeClient,
   getOrCreateClient,
+  getOrCreateClientWithCallbacks,
   
   // WhatsApp operations
   getSessionInfo,

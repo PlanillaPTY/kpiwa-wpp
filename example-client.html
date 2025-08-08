@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp QR Code Demo</title>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .qr-container {
+            text-align: center;
+            margin: 20px 0;
+            padding: 20px;
+            background: #f9f9f9;
+            border-radius: 5px;
+        }
+        .qr-code {
+            font-family: monospace;
+            font-size: 8px;
+            line-height: 1;
+            white-space: pre;
+            background: white;
+            padding: 10px;
+            border: 1px solid #ddd;
+            display: inline-block;
+        }
+        .qr-image {
+            max-width: 300px;
+            margin: 10px;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .status.info { background: #d1ecf1; color: #0c5460; }
+        .status.success { background: #d4edda; color: #155724; }
+        .status.error { background: #f8d7da; color: #721c24; }
+        .status.warning { background: #fff3cd; color: #856404; }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #6c757d; cursor: not-allowed; }
+        input {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            margin: 5px;
+        }
+        .logs {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 10px;
+            margin: 10px 0;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📱 WhatsApp QR Code Demo</h1>
+        <p>This demo shows how to initialize a WhatsApp session and receive QR codes in real-time via WebSocket.</p>
+        
+        <div>
+            <label>
+                Session Name: 
+                <input type="text" id="sessionName" value="demo-session" placeholder="Enter session name">
+            </label>
+            <button onclick="initializeSession()" id="initBtn">Initialize Session</button>
+            <button onclick="disconnect()" id="disconnectBtn" disabled>Disconnect</button>
+        </div>
+        
+        <div id="status" class="status info">Ready to initialize session</div>
+        
+        <div id="qrContainer" class="qr-container" style="display: none;">
+            <h3>📱 Scan this QR code with WhatsApp:</h3>
+            <div id="qrCode" class="qr-code"></div>
+            <img id="qrImage" class="qr-image" style="display: none;" alt="QR Code">
+            <p><small>Attempt #<span id="qrAttempts">0</span></small></p>
+        </div>
+        
+        <div class="logs">
+            <h4>📜 Event Log:</h4>
+            <div id="logs"></div>
+        </div>
+    </div>
+
+    <script>
+        let socket = null;
+        let currentSession = null;
+        
+        function log(message, type = 'info') {
+            const logs = document.getElementById('logs');
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.innerHTML = `[${timestamp}] ${message}`;
+            logEntry.style.color = type === 'error' ? 'red' : type === 'success' ? 'green' : 'black';
+            logs.appendChild(logEntry);
+            logs.scrollTop = logs.scrollHeight;
+        }
+        
+        function updateStatus(message, type = 'info') {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = `status ${type}`;
+        }
+        
+        function connectWebSocket() {
+            // Change this URL to match your server
+            socket = io('http://localhost:3000');
+            
+            socket.on('connect', () => {
+                log('✅ Connected to WebSocket server', 'success');
+                updateStatus('Connected to server', 'success');
+            });
+            
+            socket.on('disconnect', (reason) => {
+                log(`❌ Disconnected from WebSocket server: ${reason}`, 'error');
+                
+                // Clean up UI state
+                currentSession = null;
+                document.getElementById('initBtn').disabled = false;
+                document.getElementById('disconnectBtn').disabled = true;
+                document.getElementById('qrContainer').style.display = 'none';
+                
+                if (reason === 'io server disconnect') {
+                    updateStatus('Session completed - Disconnected by server', 'success');
+                } else {
+                    updateStatus(`Disconnected from server: ${reason}`, 'error');
+                }
+            });
+            
+            socket.on('qr-code', (qrData) => {
+                log(`📱 Received QR Code (attempt ${qrData.attempts})`, 'info');
+                displayQRCode(qrData);
+            });
+            
+            socket.on('status-update', (statusData) => {
+                log(`📊 Status: ${statusData.status}`, 'info');
+                handleStatusUpdate(statusData);
+            });
+            
+            socket.on('session-complete', (data) => {
+                log(`✅ Session complete: ${data.message}`, 'success');
+                updateStatus(`✅ ${data.message}`, 'success');
+                
+                // Clean up UI since session is complete
+                document.getElementById('qrContainer').style.display = 'none';
+                document.getElementById('initBtn').disabled = false;
+                document.getElementById('disconnectBtn').disabled = true;
+                
+                // Socket will be disconnected by server automatically
+                log('🔌 WebSocket will be disconnected automatically', 'info');
+            });
+        }
+        
+        function displayQRCode(qrData) {
+            const qrContainer = document.getElementById('qrContainer');
+            const qrCode = document.getElementById('qrCode');
+            const qrImage = document.getElementById('qrImage');
+            const qrAttempts = document.getElementById('qrAttempts');
+            
+            qrContainer.style.display = 'block';
+            qrCode.textContent = qrData.ascii || 'QR code data received';
+            qrAttempts.textContent = qrData.attempts || 1;
+            
+            if (qrData.base64) {
+                qrImage.src = qrData.base64;
+                qrImage.style.display = 'block';
+            }
+            
+            updateStatus(`QR Code received (attempt ${qrData.attempts}). Scan with WhatsApp!`, 'warning');
+        }
+        
+        function handleStatusUpdate(statusData) {
+            switch (statusData.status) {
+                case 'qrReadSuccess':
+                case 'authenticated':
+                case 'ready':
+                    updateStatus('✅ WhatsApp authenticated successfully!', 'success');
+                    document.getElementById('qrContainer').style.display = 'none';
+                    document.getElementById('initBtn').disabled = false;
+                    document.getElementById('disconnectBtn').disabled = false;
+                    break;
+                    
+                case 'qrReadError':
+                case 'error':
+                case 'initialization-error':
+                    updateStatus(`❌ Error: ${statusData.error || statusData.status}`, 'error');
+                    document.getElementById('initBtn').disabled = false;
+                    break;
+                    
+                case 'notLogged':
+                    updateStatus('⏳ Waiting for QR code scan...', 'warning');
+                    break;
+                    
+                default:
+                    updateStatus(`📊 Status: ${statusData.status}`, 'info');
+            }
+        }
+        
+        async function initializeSession() {
+            const sessionName = document.getElementById('sessionName').value.trim();
+            if (!sessionName) {
+                alert('Please enter a session name');
+                return;
+            }
+            
+            if (!socket) {
+                connectWebSocket();
+            }
+            
+            currentSession = sessionName;
+            document.getElementById('initBtn').disabled = true;
+            document.getElementById('disconnectBtn').disabled = false;
+            
+            // Join the session room
+            socket.emit('join-session', sessionName);
+            log(`🏠 Joined session room: ${sessionName}`, 'info');
+            
+            updateStatus('Initializing session...', 'info');
+            
+            try {
+                const response = await fetch(`http://localhost:3000/api/sessions/${sessionName}/initialize-with-qr`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({})
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    log(`🚀 Session initialization started: ${data.message}`, 'success');
+                    updateStatus('Session initializing... Waiting for QR code or authentication', 'info');
+                } else {
+                    log(`❌ Failed to initialize: ${data.error}`, 'error');
+                    updateStatus(`Error: ${data.error}`, 'error');
+                    document.getElementById('initBtn').disabled = false;
+                }
+            } catch (error) {
+                log(`❌ Network error: ${error.message}`, 'error');
+                updateStatus(`Network error: ${error.message}`, 'error');
+                document.getElementById('initBtn').disabled = false;
+            }
+        }
+        
+        function disconnect() {
+            if (socket && socket.connected && currentSession) {
+                socket.emit('leave-session', currentSession);
+                log(`👋 Left session room: ${currentSession}`, 'info');
+            }
+            
+            if (socket && socket.connected) {
+                socket.disconnect();
+                log('🔌 Manually disconnected from WebSocket', 'info');
+            }
+            
+            socket = null;
+            currentSession = null;
+            document.getElementById('initBtn').disabled = false;
+            document.getElementById('disconnectBtn').disabled = true;
+            document.getElementById('qrContainer').style.display = 'none';
+            updateStatus('Disconnected', 'info');
+        }
+        
+        // Initialize on page load
+        window.addEventListener('load', () => {
+            log('🌐 Demo client loaded', 'info');
+        });
+    </script>
+</body>
+</html>

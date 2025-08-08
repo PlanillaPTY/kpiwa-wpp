@@ -5,12 +5,21 @@ const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
+const { createServer } = require('http');
+const { Server } = require('socket.io');
 require('dotenv').config();
 
 // Import WhatsApp functionality
 const wpp = require('./wpp-playground');
 
 const app = express();
+const server = createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: "*", // Configure this properly for production
+    methods: ["GET", "POST"]
+  }
+});
 const PORT = process.env.PORT || 3000;
 
 // Middleware
@@ -117,6 +126,101 @@ app.post('/api/sessions/:sessionName/initialize', async (req, res) => {
         initialized: true
       }
     });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * @route POST /api/sessions/:sessionName/initialize-with-qr
+ * @desc Initialize a WhatsApp session with real-time QR code and status updates via WebSocket
+ */
+app.post('/api/sessions/:sessionName/initialize-with-qr', async (req, res) => {
+  try {
+    const { sessionName } = req.params;
+    const options = req.body || {};
+    
+    // Set up WebSocket callbacks for QR code and status updates
+    const qrCallback = (qrData) => {
+      console.log(`📡 Emitting QR code for session: ${sessionName}`);
+      io.to(`session-${sessionName}`).emit('qr-code', qrData);
+    };
+    
+    const statusCallback = (statusData) => {
+      console.log(`📡 Emitting status update for session: ${sessionName}`, statusData.status);
+      io.to(`session-${sessionName}`).emit('status-update', statusData);
+      
+      // Auto-disconnect clients when WhatsApp is successfully connected
+      if (statusData.status === 'authenticated' || statusData.status === 'ready' || statusData.status === 'inChat') {
+        console.log(`🔌 Auto-disconnecting WebSocket clients for session: ${sessionName} (WhatsApp connected)`);
+        
+        // Get all sockets in the session room and disconnect them
+        const room = io.sockets.adapter.rooms.get(`session-${sessionName}`);
+        if (room) {
+          room.forEach(socketId => {
+            const socket = io.sockets.sockets.get(socketId);
+            if (socket) {
+              socket.emit('session-complete', {
+                sessionName: sessionName,
+                status: statusData.status,
+                message: 'WhatsApp connected successfully. WebSocket connection will be closed.',
+                timestamp: new Date().toISOString()
+              });
+              
+              // Disconnect after a brief delay to ensure the message is sent
+              setTimeout(() => {
+                socket.disconnect();
+                console.log(`🔌 Disconnected WebSocket client: ${socketId}`);
+              }, 1000);
+            }
+          });
+        }
+      }
+    };
+    
+    // Respond immediately that initialization has started
+    res.json({
+      success: true,
+      message: `Session ${sessionName} initialization started. Connect to WebSocket and join room 'session-${sessionName}' for QR code and status updates`,
+      data: {
+        sessionName,
+        initializing: true,
+        websocketRoom: `session-${sessionName}`,
+        events: {
+          qrCode: 'qr-code',
+          statusUpdate: 'status-update'
+        }
+      }
+    });
+    
+    // Start initialization asynchronously with callbacks
+    wpp.getOrCreateClientWithCallbacks(sessionName, {
+      ...options,
+      onQRCode: qrCallback,
+      onStatusChange: statusCallback
+    }).then((client) => {
+      console.log(`✅ Session ${sessionName} initialized successfully`);
+      // Final status update to confirm successful initialization
+      statusCallback({
+        status: 'ready',
+        sessionName: sessionName,
+        timestamp: new Date().toISOString(),
+        message: 'Client fully initialized and ready'
+      });
+    }).catch((error) => {
+      console.log(`❌ Error initializing session ${sessionName}:`, error.message);
+      // Error status update
+      statusCallback({
+        status: 'initialization-error',
+        sessionName: sessionName,
+        timestamp: new Date().toISOString(),
+        error: error.message
+      });
+    });
+    
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -472,14 +576,37 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
-app.listen(PORT, () => {
+// Socket.IO connection handling
+io.on('connection', (socket) => {
+  console.log(`📡 Client connected: ${socket.id}`);
+  
+  socket.on('disconnect', () => {
+    console.log(`📡 Client disconnected: ${socket.id}`);
+  });
+  
+  // Join a session room for targeted updates
+  socket.on('join-session', (sessionName) => {
+    socket.join(`session-${sessionName}`);
+    console.log(`📡 Client ${socket.id} joined session room: ${sessionName}`);
+  });
+  
+  // Leave a session room
+  socket.on('leave-session', (sessionName) => {
+    socket.leave(`session-${sessionName}`);
+    console.log(`📡 Client ${socket.id} left session room: ${sessionName}`);
+  });
+});
+
+server.listen(PORT, () => {
   console.log(`🚀 WhatsApp API Server running on port ${PORT}`);
+  console.log(`📡 WebSocket server running on the same port`);
   console.log(`📚 API Documentation:`);
   console.log(`   GET  /health - Health check`);
   console.log(`   GET  /api/sessions - List all sessions`);
   console.log(`   GET  /api/sessions/status - Get all sessions status`);
   console.log(`   GET  /api/sessions/:sessionName/status - Get session status`);
   console.log(`   POST /api/sessions/:sessionName/initialize - Initialize session`);
+  console.log(`   POST /api/sessions/:sessionName/initialize-with-qr - Initialize with WebSocket QR updates`);
   console.log(`   DELETE /api/sessions/:sessionName - Delete session`);
   console.log(`   GET  /api/sessions/:sessionName/info - Get session info`);
   console.log(`   POST /api/sessions/:sessionName/send-message - Send text message`);
