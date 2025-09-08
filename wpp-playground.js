@@ -2,59 +2,27 @@ const fs = require('fs');
 const path = require('path');
 const wppconnect = require('@wppconnect-team/wppconnect');
 
-// Create a FileTokenStore instance for managing session tokens
-const tokenStore = new wppconnect.tokenStore.FileTokenStore({
-  fileExtension: '.json',
-  path: './data/session_tokens',
-});
 
 // Client cache - store multiple clients by session name
 const clients = new Map();
 
-// Helper function to check if a session exists by looking for token files
-async function sessionExists(sessionName) {
-  try {
-    const tokensDir = path.join(__dirname, 'data', 'tokens');
-    const sessionDir = path.join(tokensDir, sessionName);
-    return fs.existsSync(sessionDir);
-  } catch (error) {
-    console.log(`⚠️ Error checking session existence for ${sessionName}: ${error.message}`);
-    return false;
-  }
-}
 
 // Enhanced helper function to get or create a client with custom QR and status callbacks
 async function getOrCreateClientWithCallbacks(sessionName, options = {}) {
   const { onQRCode, onStatusChange, ...wppOptions } = options;
   
-  // Check if session exists by looking for token files
-  const exists = await sessionExists(sessionName);
-  
-  if (!exists) {
-    console.log(`ℹ️ Session '${sessionName}' not found in tokens folder. It will be created.`);
-  } else {
-    console.log(`ℹ️ Session '${sessionName}' found in tokens folder.`);
-  }
-
-  // Check if we have a cached client
+  // Check if we have a cached client (for performance)
   if (clients.has(sessionName)) {
     const existingClient = clients.get(sessionName);
-    console.log('Client has been found', existingClient);
+    console.log('✅ Client already cached, reusing existing connection');
     
+    // Test if the client is still usable by trying a simple operation
     try {
-      // Check if client is still connected
-      const isConnected = await existingClient.isConnected();
-      
-      if (isConnected) {
-        console.log('✅ Client already initialized and connected, reusing existing connection');
-        return existingClient;
-      } else {
-        console.log('⚠️ Cached client found but not connected, removing and reinitializing');
-        clients.delete(sessionName);
-        // Fall through to create new client
-      }
+      // Try to get connection state - this will fail if client is detached
+      await existingClient.getConnectionState();
+      return existingClient;
     } catch (error) {
-      console.log('⚠️ Error checking cached client state, removing and reinitializing');
+      console.log(`⚠️ Cached client is not usable (${error.message}), removing and will recreate`);
       clients.delete(sessionName);
       // Fall through to create new client
     }
@@ -105,40 +73,6 @@ async function getOrCreateClientWithCallbacks(sessionName, options = {}) {
     clients.set(sessionName, client);
     console.log('✅ Client initialized successfully with callbacks!');
 
-    // Wait a bit for client to be fully initialized, then check authentication
-    setTimeout(async () => {
-      try {
-        if (await client.isConnected()) {
-          console.log('✅ WhatsApp is connected');
-
-          const sessionToken = await client.getSessionTokenBrowser();
-          console.log('📦 Extracted session token:', sessionToken);
-
-          // Save it manually using your tokenStore
-          await tokenStore.setToken(sessionName, sessionToken);
-          console.log('💾 Token saved manually to FileTokenStore');
-          
-          // Notify status change callback of successful connection
-          if (onStatusChange && typeof onStatusChange === 'function') {
-            onStatusChange({
-              status: 'authenticated',
-              sessionName: sessionName,
-              timestamp: new Date().toISOString()
-            });
-          }
-        }
-      } catch (error) {
-        console.log(`⚠️ Error during token extraction: ${error.message}`);
-        if (onStatusChange && typeof onStatusChange === 'function') {
-          onStatusChange({
-            status: 'error',
-            sessionName: sessionName,
-            timestamp: new Date().toISOString(),
-            error: error.message
-          });
-        }
-      }
-    }, 2000); // Wait 2 seconds for client to be ready
 
     return client;
 
@@ -160,13 +94,7 @@ async function getOrCreateClientWithCallbacks(sessionName, options = {}) {
  * Get the connection state of the WhatsApp client
  */
 async function getConnectionState(sessionName) {
-  if (!clients.has(sessionName)) {
-    throw new Error(`Client not initialized for session: ${sessionName}. Call create() first.`);
-  }
-  const client = clients.get(sessionName);
-  if (!client) {
-    throw new Error(`Client not found for session: ${sessionName}`);
-  }
+  const client = await getOrCreateClientWithCallbacks(sessionName);
   return await client.getConnectionState();
 }
 
@@ -174,13 +102,7 @@ async function getConnectionState(sessionName) {
  * Check if the WhatsApp client is authenticated
  */
 async function isAuthenticated(sessionName) {
-  if (!clients.has(sessionName)) {
-    throw new Error(`Client not initialized for session: ${sessionName}. Call create() first.`);
-  }
-  const client = clients.get(sessionName);
-  if (!client) {
-    throw new Error(`Client not found for session: ${sessionName}`);
-  }
+  const client = await getOrCreateClientWithCallbacks(sessionName);
   return await client.isAuthenticated();
 }
 
@@ -188,13 +110,7 @@ async function isAuthenticated(sessionName) {
  * Get the WhatsApp ID (WID) of the current session
  */
 async function getWid(sessionName) {
-  if (!clients.has(sessionName)) {
-    throw new Error(`Client not initialized for session: ${sessionName}. Call create() first.`);
-  }
-  const client = clients.get(sessionName);
-  if (!client) {
-    throw new Error(`Client not found for session: ${sessionName}`);
-  }
+  const client = await getOrCreateClientWithCallbacks(sessionName);
   return await client.getWid();
 }
 
@@ -202,13 +118,7 @@ async function getWid(sessionName) {
  * Send a text message to a specific contact
  */
 async function sendText(sessionName, to, message) {
-  if (!clients.has(sessionName)) {
-    throw new Error(`Client not initialized for session: ${sessionName}. Call create() first.`);
-  }
-  const client = clients.get(sessionName);
-  if (!client) {
-    throw new Error(`Client not found for session: ${sessionName}`);
-  }
+  const client = await getOrCreateClientWithCallbacks(sessionName);
   return await client.sendText(to, message);
 }
 
@@ -216,15 +126,10 @@ async function sendText(sessionName, to, message) {
  * List chats with optional filtering and pagination
  */
 async function listChats(sessionName, options = {}) {
-  if (!clients.has(sessionName)) {
-    throw new Error(`Client not initialized for session: ${sessionName}. Call create() first.`);
-  }
-  const client = clients.get(sessionName);
-  if (!client) {
-    throw new Error(`Client not found for session: ${sessionName}`);
-  }
+  const client = await getOrCreateClientWithCallbacks(sessionName);
   return await client.listChats(options);
 }
+
 
 // Export functions for use
 module.exports = {
