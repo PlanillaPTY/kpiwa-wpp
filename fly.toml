@@ -1,7 +1,3 @@
-# fly.toml app configuration file generated for kpiwa-wpp-api on 2024-01-01T00:00:00Z
-#
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-
 app = "kpiwa-wpp"
 primary_region = "iad"
 
@@ -19,55 +15,26 @@ primary_region = "iad"
   min_machines_running = 1
   processes = ["app"]
 
-[[http_service.checks]]
-  grace_period = "10s"
-  interval = "30s"
-  method = "GET"
-  timeout = "5s"
-  path = "/health"
+  # The *only* health check the edge should use
+  [[http_service.checks]]
+    type = "http"
+    method = "GET"
+    path = "/health"
+    interval = "10s"
+    timeout = "5s"
+    grace_period = "15s"
 
 [[mounts]]
   source = "kpiwa_data"
   destination = "/app/data"
 
 [[vm]]
-  memory = "1gb"
-  cpu_kind = "shared"
+  memory = "2gb"
+  cpu_kind = "performance"
   cpus = 1
 
 [deploy]
-  release_command = "npm ci --only=production"
-
-[[services]]
-  protocol = "tcp"
-  internal_port = 3000
-
-  [[services.ports]]
-    port = 80
-    handlers = ["http"]
-    force_https = true
-
-  [[services.ports]]
-    port = 443
-    handlers = ["tls", "http"]
-
-  [services.concurrency]
-    type = "connections"
-    hard_limit = 100
-    soft_limit = 80
-
-  [[services.tcp_checks]]
-    grace_period = "1s"
-    interval = "15s"
-    restart_limit = 0
-    timeout = "2s"
-
-[[services.http_checks]]
-    interval = "10s"
-    grace_period = "5s"
-    method = "get"
-    path = "/health"
-    protocol = "http"
-    restart_limit = 0
-    timeout = "2s"
-    tls_skip_verify = false
+  # prefer rolling so your single volume machine isn't taken down first
+  strategy = "rolling"
+  # optional; if you really need a release step, keep it—but it runs in a throwaway VM
+  # release_command = "npm ci --only=production"
