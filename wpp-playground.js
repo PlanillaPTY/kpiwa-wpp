@@ -160,6 +160,10 @@ async function deleteSession(sessionName) {
     const sessionDataDir = path.join(__dirname, 'data', 'tokens', sessionName);
     
     if (fs.existsSync(sessionDataDir)) {
+      // Wait a moment for file handles to be released after client cleanup
+      console.log(`⏳ Waiting for file handles to be released...`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
       // Remove the entire session directory
       fs.rmSync(sessionDataDir, { recursive: true, force: true });
       console.log(`✅ Session data directory deleted: ${sessionDataDir}`);
