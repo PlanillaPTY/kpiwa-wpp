@@ -268,6 +268,30 @@ app.get('/api/sessions/:sessionName/wid', async (req, res) => {
   }
 });
 
+/**
+ * @route DELETE /api/sessions/:sessionName
+ * @desc Delete a WhatsApp session (cleans up cached client and persistent data)
+ */
+app.delete('/api/sessions/:sessionName', async (req, res) => {
+  try {
+    const { sessionName } = req.params;
+    
+    // Delete the session using the wpp module
+    const result = await wpp.deleteSession(sessionName);
+    
+    res.json({
+      success: true,
+      message: `Session ${sessionName} deleted successfully`,
+      data: result
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
@@ -310,13 +334,14 @@ server.listen(PORT, () => {
   console.log(`🚀 WhatsApp API Server running on port ${PORT}`);
   console.log(`📡 WebSocket server running on the same port`);
   console.log(`📚 API Documentation:`);
-  console.log(`   GET  /health - Health check`);
-  console.log(`   POST /api/sessions/:sessionName/initialize-with-qr - Initialize with WebSocket QR updates`);
-  console.log(`   POST /api/sessions/:sessionName/send-message - Send text message`);
-  console.log(`   GET  /api/sessions/:sessionName/chats - List chats`);
-  console.log(`   GET  /api/sessions/:sessionName/connection-state - Get connection state`);
-  console.log(`   GET  /api/sessions/:sessionName/authenticated - Check if authenticated`);
-  console.log(`   GET  /api/sessions/:sessionName/wid - Get WID`);
+  console.log(`   GET    /health - Health check`);
+  console.log(`   POST   /api/sessions/:sessionName/initialize-with-qr - Initialize with WebSocket QR updates`);
+  console.log(`   POST   /api/sessions/:sessionName/send-message - Send text message`);
+  console.log(`   GET    /api/sessions/:sessionName/chats - List chats`);
+  console.log(`   GET    /api/sessions/:sessionName/connection-state - Get connection state`);
+  console.log(`   GET    /api/sessions/:sessionName/authenticated - Check if authenticated`);
+  console.log(`   GET    /api/sessions/:sessionName/wid - Get WID`);
+  console.log(`   DELETE /api/sessions/:sessionName - Delete session (cleans up client and data)`);
 });
 
 module.exports = app;
