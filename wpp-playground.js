@@ -130,6 +130,57 @@ async function listChats(sessionName, options = {}) {
   return await client.listChats(options);
 }
 
+/**
+ * Delete a WhatsApp session (cleans up cached client and persistent data)
+ */
+async function deleteSession(sessionName) {
+  try {
+    console.log(`🗑️ Deleting session: ${sessionName}`);
+    
+    // 1. Close and remove the cached client if it exists
+    if (clients.has(sessionName)) {
+      const client = clients.get(sessionName);
+      try {
+        // Try to close the client gracefully
+        await client.logout();
+        console.log(`✅ Client logged out successfully for session: ${sessionName}`);
+        await client.close();
+        console.log(`✅ Client closed successfully for session: ${sessionName}`);
+      } catch (error) {
+        console.log(`⚠️ Error closing client for session ${sessionName}: ${error.message}`);
+        // Continue with deletion even if closing fails
+      }
+      
+      // Remove from cache
+      clients.delete(sessionName);
+      console.log(`✅ Client removed from cache for session: ${sessionName}`);
+    }
+    
+    // 2. Delete the persistent session data directory
+    const sessionDataDir = path.join(__dirname, 'data', 'tokens', sessionName);
+    
+    if (fs.existsSync(sessionDataDir)) {
+      // Remove the entire session directory
+      fs.rmSync(sessionDataDir, { recursive: true, force: true });
+      console.log(`✅ Session data directory deleted: ${sessionDataDir}`);
+    } else {
+      console.log(`ℹ️ Session data directory does not exist: ${sessionDataDir}`);
+    }
+    
+    return {
+      sessionName,
+      deleted: true,
+      clientRemoved: clients.has(sessionName) === false,
+      dataDirectoryDeleted: !fs.existsSync(sessionDataDir),
+      timestamp: new Date().toISOString()
+    };
+    
+  } catch (error) {
+    console.log(`❌ Error deleting session ${sessionName}: ${error.message}`);
+    throw error;
+  }
+}
+
 
 // Export functions for use
 module.exports = {
@@ -138,5 +189,6 @@ module.exports = {
   isAuthenticated,
   getWid,
   sendText,
-  listChats
+  listChats,
+  deleteSession
 };
