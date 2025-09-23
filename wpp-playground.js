@@ -6,6 +6,26 @@ const wppconnect = require('@wppconnect-team/wppconnect');
 // Client cache - store multiple clients by session name
 const clients = new Map();
 
+// Helper function to clean up stale Chrome lock files
+async function cleanupChromeLockFiles(sessionName) {
+  const userDataDir = path.join(__dirname, 'data', 'tokens', sessionName);
+  const lockFiles = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
+  
+  console.log(`🧹 Cleaning up stale Chrome lock files for session: ${sessionName}`);
+  
+  for (const lockFile of lockFiles) {
+    const lockPath = path.join(userDataDir, lockFile);
+    try {
+      if (fs.existsSync(lockPath)) {
+        fs.unlinkSync(lockPath);
+        console.log(`✅ Cleaned up stale lock file: ${lockFile}`);
+      }
+    } catch (error) {
+      console.log(`⚠️ Could not remove lock file ${lockFile}: ${error.message}`);
+    }
+  }
+}
+
 
 // Enhanced helper function to get or create a client with custom QR and status callbacks
 async function getOrCreateClientWithCallbacks(sessionName, options = {}) {
@@ -31,6 +51,9 @@ async function getOrCreateClientWithCallbacks(sessionName, options = {}) {
   // Create new client with custom callbacks
   try {
     console.log(`📱 Initializing client for session: ${sessionName} with custom callbacks`);
+    
+    // Clean up any stale Chrome lock files before creating client
+    await cleanupChromeLockFiles(sessionName);
     
     const client = await wppconnect.create({
       session: sessionName,
