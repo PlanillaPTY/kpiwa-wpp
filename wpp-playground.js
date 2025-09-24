@@ -61,6 +61,19 @@ async function getOrCreateClientWithCallbacks(sessionName, options = {}) {
       puppeteerOptions: {
         userDataDir: path.join(__dirname, 'data', 'tokens', sessionName),
       },
+      browserArgs: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--disable-gpu',
+        '--disable-web-security',
+        '--disable-features=VizDisplayCompositor'
+      ],
+      disableWelcome: true,
+      disableGoogleAnalytics: true,
       useChrome: true,
       catchQR: (base64Qrimg, asciiQR, attempts, urlCode) => {
         console.log('📱 QR Code received - scan this in WhatsApp:');
