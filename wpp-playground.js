@@ -160,23 +160,28 @@ async function deleteSession(sessionName) {
   try {
     console.log(`🗑️ Deleting session: ${sessionName}`);
     
-    // 1. Close and remove the cached client if it exists
-    if (clients.has(sessionName)) {
-      const client = clients.get(sessionName);
-      try {
-        // Try to close the client gracefully
-        await client.logout();
-        console.log(`✅ Client logged out successfully for session: ${sessionName}`);
-        await client.close();
-        console.log(`✅ Client closed successfully for session: ${sessionName}`);
-      } catch (error) {
-        console.log(`⚠️ Error closing client for session ${sessionName}: ${error.message}`);
-        // Continue with deletion even if closing fails
-      }
+    // 1. Get or create the client to ensure we can properly close it
+    let client = null;
+    try {
+      // Use getOrCreateClientWithCallbacks which handles caching and cleanup
+      console.log(`📱 Getting client for proper cleanup of session: ${sessionName}`);
+      client = await getOrCreateClientWithCallbacks(sessionName);
       
-      // Remove from cache
-      clients.delete(sessionName);
-      console.log(`✅ Client removed from cache for session: ${sessionName}`);
+      // Close the client gracefully
+      await client.logout();
+      console.log(`✅ Client logged out successfully for session: ${sessionName}`);
+      await client.close();
+      console.log(`✅ Client closed successfully for session: ${sessionName}`);
+      
+    } catch (error) {
+      console.log(`⚠️ Error closing client for session ${sessionName}: ${error.message}`);
+      // Continue with deletion even if closing fails
+    } finally {
+      // Remove from cache regardless of success/failure
+      if (clients.has(sessionName)) {
+        clients.delete(sessionName);
+        console.log(`✅ Client removed from cache for session: ${sessionName}`);
+      }
     }
     
     // 2. Delete the persistent session data directory
