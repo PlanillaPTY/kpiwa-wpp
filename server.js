@@ -39,10 +39,16 @@ app.use('/api/', limiter);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
+  const memUsage = process.memoryUsage();
   res.json({
     status: 'OK',
     timestamp: new Date().toISOString(),
-    uptime: process.uptime()
+    uptime: process.uptime(),
+    memory: {
+      rss: Math.round(memUsage.rss / 1024 / 1024) + 'MB',
+      heapUsed: Math.round(memUsage.heapUsed / 1024 / 1024) + 'MB',
+      heapTotal: Math.round(memUsage.heapTotal / 1024 / 1024) + 'MB'
+    }
   });
 });
 

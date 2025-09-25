@@ -29,7 +29,7 @@ primary_region = "iad"
   destination = "/app/data"
 
 [[vm]]
-  memory = "2gb"
+  memory = "4gb"
   cpu_kind = "performance"
   cpus = 1
 
