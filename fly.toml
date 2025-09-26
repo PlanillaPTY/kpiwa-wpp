@@ -20,16 +20,16 @@ primary_region = "iad"
     type = "http"
     method = "GET"
     path = "/health"
-    interval = "10s"
-    timeout = "5s"
-    grace_period = "15s"
+    interval = "60s"
+    timeout = "10s"
+    grace_period = "30s"
 
 [[mounts]]
   source = "kpiwa_data"
   destination = "/app/data"
 
 [[vm]]
-  memory = "4gb"
+  memory = "6gb"
   cpu_kind = "performance"
   cpus = 1
 
