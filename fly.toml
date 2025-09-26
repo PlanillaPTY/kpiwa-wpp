@@ -20,19 +20,23 @@ primary_region = "iad"
     type = "http"
     method = "GET"
     path = "/health"
-    interval = "60s"
-    timeout = "10s"
-    grace_period = "30s"
+    interval = "10s"
+    timeout = "2s"
+    grace_period = "60s"
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 60
+    hard_limit = 80
 
 [[mounts]]
   source = "kpiwa_data"
   destination = "/app/data"
-  shared = true
 
 [[vm]]
   memory = "6gb"
   cpu_kind = "performance"
-  cpus = 1
+  cpus = 2
 
 [deploy]
   # prefer rolling so your single volume machine isn't taken down first
