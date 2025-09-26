@@ -37,18 +37,13 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// Health check endpoint
+// Health check endpoint - lightweight and fast
 app.get('/health', (req, res) => {
-  const memUsage = process.memoryUsage();
-  res.json({
+  // Quick response without heavy operations
+  res.status(200).json({
     status: 'OK',
     timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    memory: {
-      rss: Math.round(memUsage.rss / 1024 / 1024) + 'MB',
-      heapUsed: Math.round(memUsage.heapUsed / 1024 / 1024) + 'MB',
-      heapTotal: Math.round(memUsage.heapTotal / 1024 / 1024) + 'MB'
-    }
+    uptime: Math.round(process.uptime())
   });
 });
 
