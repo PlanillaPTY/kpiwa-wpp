@@ -27,6 +27,7 @@ primary_region = "iad"
 [[mounts]]
   source = "kpiwa_data"
   destination = "/app/data"
+  shared = true
 
 [[vm]]
   memory = "6gb"
