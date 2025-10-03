@@ -58,6 +58,7 @@ async function getOrCreateClientWithCallbacks(sessionName, options = {}) {
     const client = await wppconnect.create({
       session: sessionName,
       headless: true,
+      autoClose: 180000, // 3 minutes (180 seconds) for QR scan timeout
       puppeteerOptions: {
         userDataDir: path.join(__dirname, 'data', 'tokens', sessionName),
       },
@@ -227,6 +228,55 @@ async function deleteSession(sessionName) {
 }
 
 
+/**
+ * Cleanup a failed connection attempt without trying to reconnect
+ * Used when initialization fails to free resources
+ */
+async function cleanupFailedSession(sessionName) {
+  try {
+    console.log(`🧹 Cleaning up failed session: ${sessionName}`);
+    
+    // 1. Check if client exists in cache and close it
+    const cachedClient = clients.get(sessionName);
+    if (cachedClient) {
+      try {
+        console.log(`📱 Closing cached client for session: ${sessionName}`);
+        await cachedClient.close();
+        console.log(`✅ Client closed for session: ${sessionName}`);
+      } catch (closeError) {
+        console.log(`⚠️ Error closing client: ${closeError.message}`);
+      }
+      
+      // Remove from cache
+      clients.delete(sessionName);
+    }
+    
+    // 2. Delete the session data directory
+    const sessionDataDir = path.join(__dirname, 'data', 'tokens', sessionName);
+    
+    // Wait a moment for file handles to be released
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Delete the session directory
+    if (fs.existsSync(sessionDataDir)) {
+      fs.rmSync(sessionDataDir, { recursive: true, force: true });
+      console.log(`✅ Deleted session data directory: ${sessionDataDir}`);
+    }
+    
+    console.log(`🧹 Cleanup complete for failed session: ${sessionName}`);
+    
+    return {
+      sessionName,
+      cleaned: true,
+      timestamp: new Date().toISOString()
+    };
+    
+  } catch (error) {
+    console.log(`❌ Error cleaning up failed session ${sessionName}: ${error.message}`);
+    throw error;
+  }
+}
+
 // Export functions for use
 module.exports = {
   getOrCreateClientWithCallbacks,
@@ -235,5 +285,6 @@ module.exports = {
   getWid,
   sendText,
   listChats,
-  deleteSession
+  deleteSession,
+  cleanupFailedSession
 };
