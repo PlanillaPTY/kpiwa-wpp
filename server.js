@@ -94,6 +94,34 @@ app.post('/api/sessions/:sessionName/initialize-with-qr', async (req, res) => {
           });
         }
       }
+      
+      // Handle initialization failures - cleanup resources
+      // Only cleanup on true initialization failures, not operational errors
+      if (statusData.status === 'initialization-error') {
+        console.log(`❌ Initialization failed for session: ${sessionName}, reason: ${statusData.status}`);
+        
+        // Close the WhatsApp client to free resources after a delay
+        setTimeout(async () => {
+          try {
+            // Use the dedicated cleanup function for failed sessions
+            await wpp.cleanupFailedSession(sessionName);
+          } catch (error) {
+            console.error(`⚠️ Error cleaning up failed session ${sessionName}:`, error.message);
+          }
+          
+          // Disconnect WebSocket clients
+          const room = io.sockets.adapter.rooms.get(`session-${sessionName}`);
+          if (room) {
+            room.forEach(socketId => {
+              const socket = io.sockets.sockets.get(socketId);
+              if (socket) {
+                socket.disconnect();
+                console.log(`🔌 Disconnected WebSocket client after failure: ${socketId}`);
+              }
+            });
+          }
+        }, 2000); // Wait 2 seconds to ensure status was sent to clients
+      }
     };
     
     // Respond immediately that initialization has started
