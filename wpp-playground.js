@@ -148,7 +148,9 @@ async function isAuthenticated(sessionName) {
  */
 async function getWid(sessionName) {
   const client = await getOrCreateClientWithCallbacks(sessionName);
-  return await client.getWid();
+  const result = await client.getWid();
+  await client.close();
+  return result;
 }
 
 /**
@@ -156,7 +158,9 @@ async function getWid(sessionName) {
  */
 async function sendText(sessionName, to, message) {
   const client = await getOrCreateClientWithCallbacks(sessionName);
-  return await client.sendText(to, message);
+  const result = await client.sendText(to, message);
+  await client.close();
+  return result;
 }
 
 /**
@@ -164,7 +168,9 @@ async function sendText(sessionName, to, message) {
  */
 async function listChats(sessionName, options = {}) {
   const client = await getOrCreateClientWithCallbacks(sessionName);
-  return await client.listChats(options);
+  const result = await client.listChats(options);
+  await client.close();
+  return result;
 }
 
 /**
