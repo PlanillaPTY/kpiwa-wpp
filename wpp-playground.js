@@ -174,27 +174,62 @@ async function deleteSession(sessionName) {
   try {
     console.log(`🗑️ Deleting session: ${sessionName}`);
     
-    // 1. Get or create the client to ensure we can properly close it
-    let client = null;
-    try {
-      // Use getOrCreateClientWithCallbacks which handles caching and cleanup
-      console.log(`📱 Getting client for proper cleanup of session: ${sessionName}`);
-      client = await getOrCreateClientWithCallbacks(sessionName);
+    // 1. Handle cached client cleanup (if any exists)
+    const cachedClient = clients.get(sessionName);
+    if (cachedClient) {
+      try {
+        console.log(`📱 Found cached client for session: ${sessionName}, logging out and closing it`);
+        
+        // First logout to properly remove device from WhatsApp
+        await cachedClient.logout();
+        console.log(`✅ Client logged out successfully for session: ${sessionName}`);
+        
+        // Then close the browser
+        await cachedClient.close();
+        console.log(`✅ Cached client closed successfully for session: ${sessionName}`);
+      } catch (error) {
+        console.log(`⚠️ Error closing cached client for session ${sessionName}: ${error.message}`);
+      }
       
-      // Close the client gracefully
-      await client.logout();
-      console.log(`✅ Client logged out successfully for session: ${sessionName}`);
-      await client.close();
-      console.log(`✅ Client closed successfully for session: ${sessionName}`);
+      // Remove from cache
+      clients.delete(sessionName);
+      console.log(`✅ Client removed from cache for session: ${sessionName}`);
+    } else {
+      console.log(`ℹ️ No cached client found for session: ${sessionName}`);
       
-    } catch (error) {
-      console.log(`⚠️ Error closing client for session ${sessionName}: ${error.message}`);
-      // Continue with deletion even if closing fails
-    } finally {
-      // Remove from cache regardless of success/failure
-      if (clients.has(sessionName)) {
-        clients.delete(sessionName);
-        console.log(`✅ Client removed from cache for session: ${sessionName}`);
+      // 2. If not cached, try to reconnect ONLY if session exists and is paired
+      const sessionDataDir = path.join(__dirname, 'data', 'tokens', sessionName);
+      if (fs.existsSync(sessionDataDir)) {
+        console.log(`📁 Session data exists for: ${sessionName}, attempting to reconnect for proper logout`);
+        
+        try {
+          // Try to reconnect with a timeout - if it takes too long, skip it
+          const reconnectPromise = getOrCreateClientWithCallbacks(sessionName);
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Reconnect timeout')), 10000) // 10 second timeout
+          );
+          
+          const client = await Promise.race([reconnectPromise, timeoutPromise]);
+          
+          // Check if authenticated
+          const isAuth = await client.isAuthenticated();
+          if (isAuth) {
+            console.log(`✅ Session is authenticated, logging out properly`);
+            await client.logout();
+            console.log(`✅ Client logged out successfully for session: ${sessionName}`);
+          } else {
+            console.log(`⚠️ Session is not authenticated, skipping logout`);
+          }
+          
+          await client.close();
+          clients.delete(sessionName);
+        } catch (error) {
+          console.log(`⚠️ Could not reconnect for proper logout (${error.message}), will just delete files`);
+          // Continue with deletion even if reconnection fails
+          if (clients.has(sessionName)) {
+            clients.delete(sessionName);
+          }
+        }
       }
     }
     
