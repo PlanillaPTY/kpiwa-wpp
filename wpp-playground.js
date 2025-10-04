@@ -148,9 +148,7 @@ async function isAuthenticated(sessionName) {
  */
 async function getWid(sessionName) {
   const client = await getOrCreateClientWithCallbacks(sessionName);
-  const result = await client.getWid();
-  await client.close();
-  return result;
+  return await client.getWid();
 }
 
 /**
