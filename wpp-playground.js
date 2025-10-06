@@ -222,7 +222,9 @@ async function isAuthenticated(sessionName) {
  */
 async function getWid(sessionName) {
   const client = await getOrCreateClientWithCallbacks(sessionName);
-  return await client.getWid();
+  const result = await client.getWid();
+  await client.setOnlinePresence(false);
+  return result;
 }
 
 /**
@@ -231,14 +233,7 @@ async function getWid(sessionName) {
 async function sendText(sessionName, to, message) {
   const client = await getOrCreateClientWithCallbacks(sessionName);
   const result = await client.sendText(to, message);
-  
-  // Close client to restore phone notifications
-  await client.close();
-  clients.delete(sessionName);
-  
-  // Small cooldown to let Chrome release file handles
-  await new Promise(resolve => setTimeout(resolve, 500));
-  
+  await client.setOnlinePresence(false);
   return result;
 }
 
@@ -248,14 +243,7 @@ async function sendText(sessionName, to, message) {
 async function listChats(sessionName, options = {}) {
   const client = await getOrCreateClientWithCallbacks(sessionName);
   const result = await client.listChats(options);
-  
-  // Close client to restore phone notifications
-  await client.close();
-  clients.delete(sessionName);
-  
-  // Small cooldown to let Chrome release file handles
-  await new Promise(resolve => setTimeout(resolve, 500));
-  
+  await client.setOnlinePresence(false);
   return result;
 }
 
