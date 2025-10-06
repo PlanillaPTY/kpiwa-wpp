@@ -58,19 +58,18 @@ app.post('/api/sessions/:sessionName/initialize-with-qr', async (req, res) => {
     const { sessionName } = req.params;
     const options = req.body || {};
     
-    // Set up WebSocket callbacks for QR code and status updates
-    const qrCallback = (qrData) => {
-      console.log(`📡 Emitting QR code for session: ${sessionName}`);
-      io.to(`session-${sessionName}`).emit('qr-code', qrData);
-    };
+    // Track both conditions for session completion
+    let isInChat = false;
+    let isMainMode = false;
+    let sessionCompleteEmitted = false;  // Prevent duplicate emissions
     
-    const statusCallback = (statusData) => {
-      console.log(`📡 Emitting status update for session: ${sessionName}`, statusData.status);
-      io.to(`session-${sessionName}`).emit('status-update', statusData);
-      
-      // Auto-disconnect clients when WhatsApp is fully connected and ready for messaging
-      if (statusData.status === 'inChat') {
-        console.log(`🔌 Auto-disconnecting WebSocket clients for session: ${sessionName} (WhatsApp fully connected)`);
+    // Helper to check if both conditions are met and emit session-complete
+    const checkAndEmitSessionComplete = () => {
+      if (isInChat && isMainMode && !sessionCompleteEmitted) {
+        sessionCompleteEmitted = true;  // Set flag to prevent re-emission
+        
+        console.log(`✅ WhatsApp fully ready for session: ${sessionName} (inChat + MAIN)`);
+        console.log(`🔌 Auto-disconnecting WebSocket clients for session: ${sessionName}`);
         
         // Get all sockets in the session room and disconnect them
         const room = io.sockets.adapter.rooms.get(`session-${sessionName}`);
@@ -80,8 +79,8 @@ app.post('/api/sessions/:sessionName/initialize-with-qr', async (req, res) => {
             if (socket) {
               socket.emit('session-complete', {
                 sessionName: sessionName,
-                status: statusData.status,
-                message: 'WhatsApp connected successfully. WebSocket connection will be closed.',
+                status: 'inChat',
+                message: 'WhatsApp fully loaded and ready. WebSocket connection will be closed.',
                 timestamp: new Date().toISOString()
               });
               
@@ -93,6 +92,23 @@ app.post('/api/sessions/:sessionName/initialize-with-qr', async (req, res) => {
             }
           });
         }
+      }
+    };
+    
+    // Set up WebSocket callbacks for QR code and status updates
+    const qrCallback = (qrData) => {
+      console.log(`📡 Emitting QR code for session: ${sessionName}`);
+      io.to(`session-${sessionName}`).emit('qr-code', qrData);
+    };
+    
+    const statusCallback = (statusData) => {
+      console.log(`📡 Emitting status update for session: ${sessionName}`, statusData.status);
+      io.to(`session-${sessionName}`).emit('status-update', statusData);
+      
+      // Track inChat status
+      if (statusData.status === 'inChat') {
+        isInChat = true;
+        checkAndEmitSessionComplete();
       }
       
       // Handle initialization failures - cleanup resources
@@ -124,6 +140,19 @@ app.post('/api/sessions/:sessionName/initialize-with-qr', async (req, res) => {
       }
     };
     
+    // Callback to listen for interface state changes (MAIN = fully ready)
+    const interfaceCallback = async (client) => {
+      client.onInterfaceChange((state) => {
+        console.log(`📱 Interface changed for ${sessionName}:`, state.mode, state.displayInfo);
+        
+        // Track MAIN mode
+        if (state.mode === 'MAIN') {
+          isMainMode = true;
+          checkAndEmitSessionComplete();
+        }
+      });
+    };
+    
     // Respond immediately that initialization has started
     res.json({
       success: true,
@@ -146,6 +175,10 @@ app.post('/api/sessions/:sessionName/initialize-with-qr', async (req, res) => {
       onStatusChange: statusCallback
     }).then((client) => {
       console.log(`✅ Session ${sessionName} initialized successfully`);
+      
+      // Attach interface change listener to detect MAIN + NORMAL state
+      interfaceCallback(client);
+      
       // Final status update to confirm successful initialization
       statusCallback({
         status: 'ready',
