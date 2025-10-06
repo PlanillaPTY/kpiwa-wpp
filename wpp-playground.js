@@ -52,13 +52,9 @@ async function getOrCreateClientWithCallbacks(sessionName, options = {}) {
   try {
     console.log(`📱 Initializing client for session: ${sessionName} with custom callbacks`);
     
-    // Clean up any stale Chrome lock files before creating client
-    await cleanupChromeLockFiles(sessionName);
-    
     const client = await wppconnect.create({
       session: sessionName,
       headless: true,
-      autoClose: 180000, // 3 minutes (180 seconds) for QR scan timeout
       puppeteerOptions: {
         userDataDir: path.join(__dirname, 'data', 'tokens', sessionName),
       },
@@ -110,11 +106,89 @@ async function getOrCreateClientWithCallbacks(sessionName, options = {}) {
     clients.set(sessionName, client);
     console.log('✅ Client initialized successfully with callbacks!');
 
-
     return client;
 
   } catch (error) {
     console.log(`❌ Error initializing client: ${error.message}`);
+    
+    // If it's a "profile in use" error, try cleaning up lock files and retry once
+    if (error.message.includes('SingletonLock') || error.message.includes('ProcessSingleton')) {
+      console.log('⚠️ Detected stale lock files, cleaning up and retrying...');
+      await cleanupChromeLockFiles(sessionName);
+      
+      // Wait for file handles to release
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Retry once
+      try {
+        const client = await wppconnect.create({
+          session: sessionName,
+          headless: true,
+          puppeteerOptions: {
+            userDataDir: path.join(__dirname, 'data', 'tokens', sessionName),
+          },
+          browserArgs: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu',
+            '--disable-web-security',
+            '--disable-features=VizDisplayCompositor'
+          ],
+          disableWelcome: true,
+          disableGoogleAnalytics: true,
+          useChrome: true,
+          catchQR: (base64Qrimg, asciiQR, attempts, urlCode) => {
+            console.log('📱 QR Code received - scan this in WhatsApp:');
+            console.log(`Attempts: ${attempts}`);
+            console.log(asciiQR);
+            
+            if (onQRCode && typeof onQRCode === 'function') {
+              onQRCode({
+                base64: base64Qrimg,
+                ascii: asciiQR,
+                attempts: attempts,
+                urlCode: urlCode,
+                sessionName: sessionName
+              });
+            }
+          },
+          statusFind: (status) => {
+            console.log(`📱 Status for ${sessionName}:`, status);
+            
+            if (onStatusChange && typeof onStatusChange === 'function') {
+              onStatusChange({
+                status: status,
+                sessionName: sessionName,
+                timestamp: new Date().toISOString()
+              });
+            }
+          },
+          ...wppOptions
+        });
+        
+        clients.set(sessionName, client);
+        console.log('✅ Client initialized successfully after cleanup!');
+        return client;
+        
+      } catch (retryError) {
+        console.log(`❌ Retry failed: ${retryError.message}`);
+        if (onStatusChange && typeof onStatusChange === 'function') {
+          onStatusChange({
+            status: 'error',
+            sessionName: sessionName,
+            timestamp: new Date().toISOString(),
+            error: retryError.message
+          });
+        }
+        throw retryError;
+      }
+    }
+    
+    // Not a lock file error, just propagate
     if (onStatusChange && typeof onStatusChange === 'function') {
       onStatusChange({
         status: 'error',
@@ -157,7 +231,14 @@ async function getWid(sessionName) {
 async function sendText(sessionName, to, message) {
   const client = await getOrCreateClientWithCallbacks(sessionName);
   const result = await client.sendText(to, message);
+  
+  // Close client to restore phone notifications
   await client.close();
+  clients.delete(sessionName);
+  
+  // Small cooldown to let Chrome release file handles
+  await new Promise(resolve => setTimeout(resolve, 500));
+  
   return result;
 }
 
@@ -167,7 +248,14 @@ async function sendText(sessionName, to, message) {
 async function listChats(sessionName, options = {}) {
   const client = await getOrCreateClientWithCallbacks(sessionName);
   const result = await client.listChats(options);
+  
+  // Close client to restore phone notifications
   await client.close();
+  clients.delete(sessionName);
+  
+  // Small cooldown to let Chrome release file handles
+  await new Promise(resolve => setTimeout(resolve, 500));
+  
   return result;
 }
 
