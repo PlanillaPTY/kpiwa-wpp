@@ -213,8 +213,36 @@ async function getConnectionState(sessionName) {
  * Check if the WhatsApp client is authenticated
  */
 async function isAuthenticated(sessionName) {
-  const client = await getOrCreateClientWithCallbacks(sessionName);
-  return await client.isAuthenticated();
+  return new Promise((resolve) => {
+    let resolved = false;
+    
+    getOrCreateClientWithCallbacks(sessionName, {
+      statusFind: (status) => {
+        if (resolved) return;
+        
+        if (status === 'desconnectedMobile') {
+          resolved = true;
+          resolve(false);
+        }
+        // For all other statuses, let it resolve normally
+      }
+    }).then(async (client) => {
+      if (!resolved) {
+        resolved = true;
+        try {
+          const authResult = await client.isAuthenticated();
+          resolve(authResult);
+        } catch (error) {
+          resolve(false);
+        }
+      }
+    }).catch((error) => {
+      if (!resolved) {
+        resolved = true;
+        resolve(false);
+      }
+    });
+  });
 }
 
 /**
@@ -231,20 +259,91 @@ async function getWid(sessionName) {
  * Send a text message to a specific contact
  */
 async function sendText(sessionName, to, message) {
-  const client = await getOrCreateClientWithCallbacks(sessionName);
-  const result = await client.sendText(to, message);
-  await client.setOnlinePresence(false);
-  return result;
+  // Check authentication first
+  let isAuth;
+  try {
+    isAuth = await isAuthenticated(sessionName);
+  } catch (error) {
+    return {
+      success: false,
+      error: `Authentication check failed: ${error.message}`,
+      isAuthenticated: false
+    };
+  }
+  
+  if (!isAuth) {
+    return {
+      success: false,
+      error: 'Session not authenticated',
+      isAuthenticated: false
+    };
+  }
+  
+  // Proceed with sending message
+  try {
+    const client = await getOrCreateClientWithCallbacks(sessionName);
+    const result = await client.sendText(to, message);
+    await client.setOnlinePresence(false);
+    
+    return {
+      success: true,
+      result: result,
+      isAuthenticated: true
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message,
+      isAuthenticated: false
+    };
+  }
 }
 
 /**
  * List chats with optional filtering and pagination
  */
 async function listChats(sessionName, options = {}) {
-  const client = await getOrCreateClientWithCallbacks(sessionName);
-  const result = await client.listChats(options);
-  await client.setOnlinePresence(false);
-  return result;
+  // Check authentication first
+  let isAuth;
+  try {
+    isAuth = await isAuthenticated(sessionName);
+  } catch (error) {
+    return {
+      success: false,
+      error: `Authentication check failed: ${error.message}`,
+      isAuthenticated: false,
+      chats: []
+    };
+  }
+  
+  if (!isAuth) {
+    return {
+      success: false,
+      error: 'Session not authenticated',
+      isAuthenticated: false,
+      chats: []
+    };
+  }
+  
+  // Proceed with listing chats
+  try {
+    const client = await getOrCreateClientWithCallbacks(sessionName);
+    const result = await client.listChats(options);
+    await client.setOnlinePresence(false);
+    
+    return {
+      success: true,
+      chats: result,
+      isAuthenticated: true
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message,
+      isAuthenticated: false,
+      chats: []
+    };
+  }
 }
 
 /**
