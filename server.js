@@ -223,10 +223,22 @@ app.post('/api/sessions/:sessionName/send-message', async (req, res) => {
     
     const result = await wpp.sendText(sessionName, to, message);
     
+    // Handle authentication failures
+    if (!result.success && !result.isAuthenticated) {
+      return res.status(401).json({
+        success: false,
+        error: result.error,
+        isAuthenticated: false,
+        message: 'Session disconnected. Please reconnect.'
+      });
+    }
+    
+    // Success
     res.json({
       success: true,
       message: 'Message sent successfully',
-      data: result
+      data: result.result,
+      isAuthenticated: result.isAuthenticated
     });
   } catch (error) {
     res.status(500).json({
@@ -252,17 +264,31 @@ app.get('/api/sessions/:sessionName/chats', async (req, res) => {
       if (!isNaN(options[key]) && options[key] !== '') options[key] = parseInt(options[key]);
     });
     
-    const chats = await wpp.listChats(sessionName, options);
+    const result = await wpp.listChats(sessionName, options);
     
+    // Handle authentication failures
+    if (!result.success && !result.isAuthenticated) {
+      return res.status(401).json({
+        success: false,
+        error: result.error,
+        isAuthenticated: false,
+        message: 'Session disconnected. Please reconnect.',
+        chats: result.chats || []
+      });
+    }
+    
+    // Success
     res.json({
       success: true,
-      data: chats,
-      count: chats.length
+      data: result.chats,
+      count: result.chats.length,
+      isAuthenticated: result.isAuthenticated
     });
   } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message
+      error: error.message,
+      chats: []
     });
   }
 });
