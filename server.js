@@ -206,6 +206,152 @@ app.post('/api/sessions/:sessionName/initialize-with-qr', async (req, res) => {
 });
 
 /**
+ * @route POST /api/sessions/:sessionName/reconnect
+ * @desc Reconnect an existing WhatsApp session
+ */
+app.post('/api/sessions/:sessionName/reconnect', async (req, res) => {
+  try {
+    const { sessionName } = req.params;
+    const options = req.body || {};
+    
+    // Track both conditions for session completion
+    let isInChat = false;
+    let isMainMode = false;
+    let sessionCompleteEmitted = false;
+    
+    // Helper to check if both conditions are met and emit session-complete
+    const checkAndEmitSessionComplete = () => {
+      if (isInChat && isMainMode && !sessionCompleteEmitted) {
+        sessionCompleteEmitted = true;
+        
+        console.log(`✅ WhatsApp fully ready for session: ${sessionName} (inChat + MAIN)`);
+        console.log(`🔌 Auto-disconnecting WebSocket clients for session: ${sessionName}`);
+        
+        const room = io.sockets.adapter.rooms.get(`session-${sessionName}`);
+        if (room) {
+          room.forEach(socketId => {
+            const socket = io.sockets.sockets.get(socketId);
+            if (socket) {
+              socket.emit('session-complete', {
+                sessionName: sessionName,
+                status: 'inChat',
+                message: 'WhatsApp reconnected and ready. WebSocket connection will be closed.',
+                timestamp: new Date().toISOString()
+              });
+              
+              setTimeout(() => {
+                socket.disconnect();
+                console.log(`🔌 Disconnected WebSocket client: ${socketId}`);
+              }, 1000);
+            }
+          });
+        }
+      }
+    };
+    
+    // Set up WebSocket callbacks for QR code and status updates
+    const qrCallback = (qrData) => {
+      console.log(`📡 Emitting QR code for session: ${sessionName}`);
+      io.to(`session-${sessionName}`).emit('qr-code', qrData);
+    };
+    
+    const statusCallback = (statusData) => {
+      console.log(`📡 Emitting status update for session: ${sessionName}`, statusData.status);
+      io.to(`session-${sessionName}`).emit('status-update', statusData);
+      
+      // Track inChat status
+      if (statusData.status === 'inChat') {
+        isInChat = true;
+        checkAndEmitSessionComplete();
+      }
+      
+      // Handle reconnection failures - no cleanup, just disconnect WebSocket
+      if (statusData.status === 'initialization-error') {
+        console.log(`❌ Reconnection failed for session: ${sessionName}`);
+        
+        // Disconnect WebSocket clients only
+        setTimeout(() => {
+          const room = io.sockets.adapter.rooms.get(`session-${sessionName}`);
+          if (room) {
+            room.forEach(socketId => {
+              const socket = io.sockets.sockets.get(socketId);
+              if (socket) {
+                socket.disconnect();
+                console.log(`🔌 Disconnected WebSocket client after reconnection failure: ${socketId}`);
+              }
+            });
+          }
+        }, 2000);
+      }
+    };
+    
+    // Callback to listen for interface state changes (MAIN = fully ready)
+    const interfaceCallback = async (client) => {
+      client.onInterfaceChange((state) => {
+        console.log(`📱 Interface changed for ${sessionName}:`, state.mode, state.displayInfo);
+        
+        // Track MAIN mode
+        if (state.mode === 'MAIN') {
+          isMainMode = true;
+          checkAndEmitSessionComplete();
+        }
+      });
+    };
+    
+    // Respond immediately that reconnection has started
+    res.json({
+      success: true,
+      message: `Session ${sessionName} reconnection started. Connect to WebSocket and join room 'session-${sessionName}' for QR code and status updates`,
+      data: {
+        sessionName,
+        reconnecting: true,
+        websocketRoom: `session-${sessionName}`,
+        events: {
+          qrCode: 'qr-code',
+          statusUpdate: 'status-update',
+          sessionComplete: 'session-complete'
+        }
+      }
+    });
+    
+    // Start reconnection asynchronously with callbacks
+    wpp.getOrCreateClientWithCallbacks(sessionName, {
+      ...options,
+      onQRCode: qrCallback,
+      onStatusChange: statusCallback
+    }).then((client) => {
+      console.log(`✅ Session ${sessionName} reconnected successfully`);
+      
+      // Attach interface change listener to detect MAIN + NORMAL state
+      interfaceCallback(client);
+      
+      // Final status update to confirm successful reconnection
+      statusCallback({
+        status: 'ready',
+        sessionName: sessionName,
+        timestamp: new Date().toISOString(),
+        message: 'Client reconnected and ready'
+      });
+    }).catch((error) => {
+      console.log(`❌ Error reconnecting session ${sessionName}:`, error.message);
+      // Error status update
+      statusCallback({
+        status: 'initialization-error',
+        sessionName: sessionName,
+        timestamp: new Date().toISOString(),
+        error: error.message
+      });
+    });
+    
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
  * @route POST /api/sessions/:sessionName/send-message
  * @desc Send a text message
  */
